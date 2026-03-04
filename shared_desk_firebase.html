@@ -36,7 +36,13 @@
 
   // ================================================================
   // ZAMIJENITE OVO S VAŠIM firebaseConfig PODACIMA IZ KORAKA 5:
-  const firebaseConfig = {
+ // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
   apiKey: "AIzaSyDeOZkrrs1ri6cIMtSCvShyQxld-jzW8l4",
   authDomain: "ias-shared-desk.firebaseapp.com",
   databaseURL: "https://ias-shared-desk-default-rtdb.europe-west1.firebasedatabase.app",
@@ -45,6 +51,9 @@
   messagingSenderId: "752309546769",
   appId: "1:752309546769:web:75a3b96e20e3a918d1e6b0"
 };
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
   // ================================================================
 
   const app = initializeApp(firebaseConfig);
@@ -249,9 +258,9 @@ td.cell select.park-reserved { background:#d1fae5; color:#065f46; font-weight:60
 <div id="syncStatus" class="synced">✓ Sinkronizirano</div>
 
 <div class="top-bar">
-  <h1>📋 Shared Desk</h1>
-  <div><label>Mj: </label><select id="monthSel" onchange="rebuild()"></select></div>
-  <div><label>God: </label><select id="yearSel" onchange="rebuild()"></select></div>
+  <h1>📋 IAS Shared Desk</h1>
+  <div><label>Mjesec: </label><select id="monthSel" onchange="rebuild()"></select></div>
+  <div><label>Godina: </label><select id="yearSel" onchange="rebuild()"></select></div>
   <button onclick="openModal('people')">👥 Osobe</button>
   <button onclick="openModal('desks')">🪑 Stolovi</button>
   <button onclick="openModal('parking')">🚗 Parking</button>
