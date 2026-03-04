@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shared Desk</title>
+
+<!--
+=================================================================
+  UPUTE ZA POSTAVLJANJE — pročitajte prije nego išta mijenjate!
+=================================================================
+
+  KORAK 1: Idite na https://console.firebase.google.com
+  KORAK 2: Kliknite "Add project" → unesite naziv → Continue
+  KORAK 3: Isključite Google Analytics (nije potrebno) → Create project
+  KORAK 4: U lijevom izborniku kliknite "Realtime Database"
+           → "Create database"
+           → Lokacija: europe-west1
+           → "Start in test mode" → Enable
+  KORAK 5: U lijevom izborniku kliknite ikonu zupčanika (⚙️)
+           → "Project settings"
+           → Skrolajte dolje do "Your apps"
+           → Kliknite ikonu "</>" (Web)
+           → Unesite naziv aplikacije → "Register app"
+           → Kopirajte firebaseConfig objekt
+  KORAK 6: Zamijenite firebaseConfig objekt ispod s vašim podacima
+  KORAK 7: Uploadajte ovu datoteku (npr. GitHub Pages, Netlify)
+  KORAK 8: U Teams kanalu → "+" za dodavanje taba
+           → odaberite "Website" → zalijepite URL
+=================================================================
+-->
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ================================================================
+  // ZAMIJENITE OVO S VAŠIM firebaseConfig PODACIMA IZ KORAKA 5:
+  const firebaseConfig = {
+  apiKey: "AIzaSyDeOZkrrs1ri6cIMtSCvShyQxld-jzW8l4",
+  authDomain: "ias-shared-desk.firebaseapp.com",
+  databaseURL: "https://ias-shared-desk-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "ias-shared-desk",
+  storageBucket: "ias-shared-desk.firebasestorage.app",
+  messagingSenderId: "752309546769",
+  appId: "1:752309546769:web:75a3b96e20e3a918d1e6b0"
+};
+  // ================================================================
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  window._fbSet    = (path, value) => set(ref(db, path), value);
+  window._fbListen = (path, cb)    => onValue(ref(db, path), snap => cb(snap.val()));
+  window._fbReady  = true;
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; background: #f0f2f5; font-size: 13px; }
+
+/* ---------- CONNECTING OVERLAY ---------- */
+#connectingOverlay {
+  position: fixed; inset: 0; background: rgba(255,255,255,0.95);
+  z-index: 999; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+}
+#connectingOverlay.hidden { display: none; }
+.spinner {
+  width: 38px; height: 38px;
+  border: 3px solid #e5e7eb; border-top-color: #1a56a0;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#connectingOverlay p   { font-size: 14px; color: #374151; font-weight: 600; }
+#connectingOverlay small { font-size: 11px; color: #9ca3af; text-align: center; max-width: 300px; }
+
+/* ---------- SYNC BADGE ---------- */
+#syncStatus {
+  position: fixed; bottom: 12px; right: 12px;
+  padding: 5px 12px; border-radius: 20px; font-size: 11px;
+  font-weight: 600; z-index: 900; pointer-events: none; transition: all .3s;
+}
+#syncStatus.syncing { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+#syncStatus.synced  { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; }
+#syncStatus.error   { background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; }
+
+/* ---------- TOP BAR ---------- */
+.top-bar {
+  display:flex; align-items:center; gap:10px;
+  background:#1a56a0; color:white; padding:10px 14px; flex-wrap:wrap;
+}
+.top-bar h1 { font-size:15px; font-weight:bold; }
+.top-bar select { padding:4px 6px; border-radius:4px; border:none; font-size:12px; }
+.top-bar button {
+  padding:5px 10px; border-radius:4px; border:none; font-size:11px;
+  cursor:pointer; background:#f0f9ff; color:#1a56a0; font-weight:bold;
+}
+.top-bar button:hover { background:#e0f2fe; }
+
+/* ---------- STATUS KARTICE ---------- */
+.status-bars { display:flex; gap:8px; padding:8px 12px; flex-wrap:wrap; }
+.stat-card {
+  display:flex; flex-direction:column; gap:4px;
+  background:white; border-radius:6px; padding:8px 14px;
+  box-shadow:0 1px 4px rgba(0,0,0,.1); flex:1; min-width:140px;
+  border-left:4px solid #22c55e;
+}
+.stat-card.tomorrow   { border-left-color:#f59e0b; }
+.stat-card.park-today { border-left-color:#065f46; }
+.stat-card.park-tom   { border-left-color:#92400e; }
+.stat-title { font-weight:bold; font-size:11px; color:#555; white-space:nowrap; }
+.stat-row   { display:flex; align-items:center; gap:6px; font-size:11px; }
+.stat-dot   { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot-green  { background:#22c55e; }
+.dot-red    { background:#ef4444; }
+.stat-num   { font-weight:bold; font-size:13px; color:#1f2937; }
+
+/* ---------- MAIN TABS ---------- */
+.main-tabs { display:flex; background:white; border-bottom:2px solid #e5e7eb; padding:0 12px; }
+.main-tab {
+  padding:9px 16px; border:none; background:none; cursor:pointer;
+  font-size:12px; font-weight:600; color:#6b7280;
+  border-bottom:2px solid transparent; margin-bottom:-2px; white-space:nowrap;
+}
+.main-tab.active { color:#1a56a0; border-bottom-color:#1a56a0; }
+
+/* ---------- TLOCRT ---------- */
+.floorplan-wrap { padding:12px; }
+.floor-date-label { text-align:center; font-size:11px; color:#6b7280; margin-bottom:8px; font-weight:600; }
+.floorplan-container { display:flex; gap:12px; flex-wrap:wrap; }
+.room { background:white; border-radius:8px; box-shadow:0 1px 6px rgba(0,0,0,.1); overflow:hidden; }
+.room-3c { flex:0 0 auto; width:260px; }
+.room-3d { flex:0 0 auto; width:220px; }
+.room-header { color:white; padding:6px 12px; font-size:12px; font-weight:bold; }
+.room-3c .room-header { background:#1a56a0; }
+.room-3d .room-header { background:#065f46; }
+.room-body { padding:10px; }
+.floor-svg { display:block; }
+.desk-btn { cursor:pointer; }
+.desk-btn:hover rect { opacity:.82; }
+.desk-bg-free  { fill:#eff6ff; stroke:#93c5fd; stroke-width:1.5; }
+.desk-bg-taken { fill:#dcfce7; stroke:#4ade80; stroke-width:1.5; }
+.desk-num-text    { font-size:9px; font-weight:bold; fill:#1e40af; font-family:Arial,sans-serif; }
+.desk-num-text.taken { fill:#15803d; }
+.desk-person-text { font-size:7px; fill:#374151; font-family:Arial,sans-serif; }
+.floor-legend { display:flex; gap:14px; padding:6px 12px 10px; font-size:11px; color:#6b7280; flex-wrap:wrap; }
+.legend-item { display:flex; align-items:center; gap:5px; }
+.legend-dot  { width:12px; height:12px; border-radius:2px; flex-shrink:0; }
+
+/* ---------- TABLICA ---------- */
+.table-section { padding:10px 12px; }
+.section-label {
+  font-weight:bold; font-size:12px; color:#374151;
+  background:#f3f4f6; padding:4px 10px;
+  border:1px solid #d1d5db; border-bottom:none;
+  border-radius:6px 6px 0 0; display:inline-block;
+}
+.section-label.park { background:#ecfdf5; border-color:#6ee7b7; color:#065f46; }
+.table-wrap { overflow-x:auto; border-radius:0 8px 8px 8px; box-shadow:0 1px 6px rgba(0,0,0,.12); margin-bottom:12px; }
+table { border-collapse:collapse; background:white; }
+th, td { border:1px solid #d1d5db; text-align:center; white-space:nowrap; }
+th.corner { background:#374151; min-width:110px; position:sticky; left:0; z-index:3; }
+th.day-header { background:#1a56a0; color:white; font-size:10px; padding:4px 3px; min-width:72px; }
+th.day-header.today-col { background:#92400e !important; }
+th.park-header { background:#065f46; color:white; font-size:10px; padding:4px 3px; min-width:72px; }
+th.park-header.today-col { background:#92400e !important; }
+tr.date-row td { background:#e8f0fe; font-size:9px; color:#444; padding:2px 3px; font-weight:600; }
+tr.date-row td.today-col { background:#fef08a !important; }
+tr.date-row td.corner-date { background:#374151; color:white; padding:2px 8px; position:sticky; left:0; z-index:2; font-size:10px; }
+tr.date-row td.park-date { background:#d1fae5; }
+tr.date-row td.park-date.today-col { background:#fef08a !important; }
+td.row-label { background:#f9fafb; font-weight:600; font-size:11px; padding:3px 8px; text-align:left; color:#1f2937; position:sticky; left:0; z-index:1; border-right:2px solid #9ca3af; min-width:110px; }
+td.row-label.park-label { background:#ecfdf5; border-right-color:#6ee7b7; }
+td.cell { padding:1px; min-width:72px; height:26px; }
+td.cell.today-col { background:#fefce8; }
+td.cell select { width:100%; height:100%; border:none; background:transparent; text-align:center; font-size:10px; padding:1px; outline:none; cursor:pointer; -webkit-appearance:none; appearance:none; text-align-last:center; }
+td.cell select:focus { background:#dbeafe; }
+td.cell select.reserved { background:#dcfce7; color:#15803d; font-weight:600; }
+td.cell select.park-reserved { background:#d1fae5; color:#065f46; font-weight:600; }
+
+/* ---------- MODALI ---------- */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; padding:12px; }
+.modal-overlay.open { display:flex; }
+.modal { background:white; border-radius:10px; padding:18px; width:100%; max-width:460px; box-shadow:0 8px 30px rgba(0,0,0,.2); max-height:90vh; overflow-y:auto; }
+.modal h2 { font-size:14px; margin-bottom:12px; color:#1a56a0; }
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; border-top:1px solid #f3f4f6; padding-top:10px; }
+.btn { padding:6px 14px; border-radius:5px; border:none; font-size:12px; cursor:pointer; font-weight:600; }
+.btn-primary   { background:#1a56a0; color:white; }
+.btn-secondary { background:#e5e7eb; color:#374151; }
+.tab-row { display:flex; margin-bottom:12px; border-bottom:2px solid #e5e7eb; overflow-x:auto; }
+.tab-btn { padding:6px 12px; border:none; background:none; cursor:pointer; font-size:11px; color:#6b7280; border-bottom:2px solid transparent; margin-bottom:-2px; font-weight:600; white-space:nowrap; }
+.tab-btn.active { color:#1a56a0; border-bottom-color:#1a56a0; }
+.tab-content { display:none; } .tab-content.active { display:block; }
+.add-single-row { display:flex; gap:6px; margin-bottom:10px; }
+.add-single-row input { flex:1; padding:5px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; }
+.add-single-row input:focus { outline:none; border-color:#1a56a0; }
+.add-single-row button { padding:5px 10px; background:#1a56a0; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; }
+.items-list { display:flex; flex-direction:column; gap:4px; max-height:200px; overflow-y:auto; margin-bottom:6px; }
+.list-item { display:flex; align-items:center; gap:5px; }
+.list-item .item-idx { font-size:10px; color:#9ca3af; width:20px; text-align:right; flex-shrink:0; }
+.list-item input { flex:1; padding:4px 7px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; }
+.del-btn { background:#fee2e2; color:#dc2626; border:none; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:11px; flex-shrink:0; }
+.bulk-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:8px; }
+.bulk-box label { font-size:11px; font-weight:600; color:#475569; display:block; margin-bottom:5px; }
+.bulk-box textarea { width:100%; height:90px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; padding:6px; resize:vertical; font-family:Arial,sans-serif; }
+.bulk-hint { font-size:10px; color:#94a3b8; margin-top:4px; }
+.bulk-actions { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
+.bulk-add-btn     { padding:5px 10px; background:#059669; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
+.bulk-replace-btn { padding:5px 10px; background:#dc2626; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
+.prefix-box { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px; margin-bottom:10px; }
+.prefix-box label { font-size:11px; font-weight:600; color:#92400e; display:block; margin-bottom:6px; }
+.prefix-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.prefix-row input { padding:5px 7px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; flex:1; min-width:100px; }
+.prefix-row span   { font-size:11px; color:#6b7280; }
+.prefix-row button { padding:5px 10px; background:#d97706; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
+.add-new-box { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px; }
+.add-new-box label { font-size:11px; font-weight:600; color:#166534; display:block; margin-bottom:6px; }
+.add-new-row { display:flex; gap:6px; }
+.add-new-row input  { flex:1; padding:5px 7px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; }
+.add-new-row button { padding:5px 10px; background:#059669; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; }
+.add-hint { font-size:10px; color:#6b7280; margin-top:5px; }
+.info { font-size:11px; color:#6b7280; padding:4px 12px 10px; }
+
+@media (max-width:600px) {
+  .top-bar { gap:7px; padding:8px 10px; }
+  .top-bar h1 { font-size:13px; }
+  .top-bar button { font-size:10px; padding:4px 7px; }
+  .status-bars { padding:6px 8px; gap:6px; }
+  .stat-card { min-width:120px; padding:6px 10px; }
+  .floorplan-container { flex-direction:column; }
+  .room-3c, .room-3d { width:100% !important; }
+  .floor-svg { width:100% !important; height:auto !important; }
+  td.cell { min-width:60px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Connecting overlay -->
+<div id="connectingOverlay">
+  <div class="spinner"></div>
+  <p>Spajanje na bazu podataka...</p>
+  <small>Ako ovo traje dulje od 15 sekundi, provjerite da ste zamijenili firebaseConfig u HTML datoteci s vašim podacima.</small>
+</div>
+
+<!-- Sync status -->
+<div id="syncStatus" class="synced">✓ Sinkronizirano</div>
+
+<div class="top-bar">
+  <h1>📋 Shared Desk</h1>
+  <div><label>Mj: </label><select id="monthSel" onchange="rebuild()"></select></div>
+  <div><label>God: </label><select id="yearSel" onchange="rebuild()"></select></div>
+  <button onclick="openModal('people')">👥 Osobe</button>
+  <button onclick="openModal('desks')">🪑 Stolovi</button>
+  <button onclick="openModal('parking')">🚗 Parking</button>
+</div>
+
+<div class="status-bars">
+  <div class="stat-card" id="card-desk-today">
+    <div class="stat-title">🪑 Stolovi — danas</div>
+    <div class="stat-row"><div class="stat-dot dot-green"></div><span id="dt-free" class="stat-num">-</span>&nbsp;slobodnih</div>
+    <div class="stat-row"><div class="stat-dot dot-red"></div><span id="dt-taken" class="stat-num">-</span>&nbsp;zauzeto</div>
+  </div>
+  <div class="stat-card tomorrow" id="card-desk-tomorrow">
+    <div class="stat-title">🪑 Stolovi — sutra</div>
+    <div class="stat-row"><div class="stat-dot dot-green"></div><span id="dm-free" class="stat-num">-</span>&nbsp;slobodnih</div>
+    <div class="stat-row"><div class="stat-dot dot-red"></div><span id="dm-taken" class="stat-num">-</span>&nbsp;zauzeto</div>
+  </div>
+  <div class="stat-card park-today" id="card-park-today">
+    <div class="stat-title">🚗 Parking — danas</div>
+    <div class="stat-row"><div class="stat-dot dot-green"></div><span id="pt-free" class="stat-num">-</span>&nbsp;slobodnih</div>
+    <div class="stat-row"><div class="stat-dot dot-red"></div><span id="pt-taken" class="stat-num">-</span>&nbsp;zauzeto</div>
+  </div>
+  <div class="stat-card park-tom" id="card-park-tomorrow">
+    <div class="stat-title">🚗 Parking — sutra</div>
+    <div class="stat-row"><div class="stat-dot dot-green"></div><span id="pm-free" class="stat-num">-</span>&nbsp;slobodnih</div>
+    <div class="stat-row"><div class="stat-dot dot-red"></div><span id="pm-taken" class="stat-num">-</span>&nbsp;zauzeto</div>
+  </div>
+</div>
+
+<div class="main-tabs">
+  <button class="main-tab active" onclick="showMainTab('floorplan')">🗺️ Tlocrt</button>
+  <button class="main-tab" onclick="showMainTab('table')">📅 Tablica</button>
+</div>
+
+<!-- ===== TLOCRT ===== -->
+<div id="tab-floorplan" class="floorplan-wrap">
+  <div class="floor-date-label" id="floorDateLabel"></div>
+  <div class="floorplan-container">
+
+    <div class="room room-3c">
+      <div class="room-header">🏢 Soba 3C</div>
+      <div class="room-body">
+        <svg class="floor-svg" width="240" height="376" viewBox="0 0 240 376" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="238" height="374" rx="5" fill="#fafbfc" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="8" y="6" width="224" height="18" rx="3" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1"/>
+          <text x="120" y="19" text-anchor="middle" font-size="9" fill="#0369a1" font-weight="bold" font-family="Arial">Terasa</text>
+          <rect x="1" y="188" width="12" height="36" rx="2" fill="#fde68a" stroke="#f59e0b" stroke-width="1"/>
+          <text x="7" y="211" text-anchor="middle" font-size="7" fill="#92400e" font-weight="bold" font-family="Arial" transform="rotate(-90,7,211)">Ulaz</text>
+          <!-- Grupa A: 1,2,4,5 + 3,6 -->
+          <g class="desk-btn" onclick="selectDesk(0)"><rect id="dr-0" x="20" y="34" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-0" x="43" y="45" text-anchor="middle" class="desk-num-text" font-family="Arial">1</text><text id="dp-0" x="43" y="57" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(1)"><rect id="dr-1" x="72" y="34" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-1" x="95" y="45" text-anchor="middle" class="desk-num-text" font-family="Arial">2</text><text id="dp-1" x="95" y="57" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(3)"><rect id="dr-3" x="20" y="68" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-3" x="43" y="79" text-anchor="middle" class="desk-num-text" font-family="Arial">4</text><text id="dp-3" x="43" y="91" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(4)"><rect id="dr-4" x="72" y="68" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-4" x="95" y="79" text-anchor="middle" class="desk-num-text" font-family="Arial">5</text><text id="dp-4" x="95" y="91" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(2)"><rect id="dr-2" x="164" y="34" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-2" x="196" y="45" text-anchor="middle" class="desk-num-text" font-family="Arial">3</text><text id="dp-2" x="196" y="57" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(5)"><rect id="dr-5" x="164" y="68" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-5" x="196" y="79" text-anchor="middle" class="desk-num-text" font-family="Arial">6</text><text id="dp-5" x="196" y="91" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <line x1="16" y1="108" x2="224" y2="108" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+          <!-- Grupa C: 7,8,10,11 + 9,12 -->
+          <g class="desk-btn" onclick="selectDesk(6)"><rect id="dr-6" x="20" y="118" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-6" x="43" y="129" text-anchor="middle" class="desk-num-text" font-family="Arial">7</text><text id="dp-6" x="43" y="141" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(7)"><rect id="dr-7" x="72" y="118" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-7" x="95" y="129" text-anchor="middle" class="desk-num-text" font-family="Arial">8</text><text id="dp-7" x="95" y="141" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(9)"><rect id="dr-9" x="20" y="152" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-9" x="43" y="163" text-anchor="middle" class="desk-num-text" font-family="Arial">10</text><text id="dp-9" x="43" y="175" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(10)"><rect id="dr-10" x="72" y="152" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-10" x="95" y="163" text-anchor="middle" class="desk-num-text" font-family="Arial">11</text><text id="dp-10" x="95" y="175" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(8)"><rect id="dr-8" x="164" y="118" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-8" x="196" y="129" text-anchor="middle" class="desk-num-text" font-family="Arial">9</text><text id="dp-8" x="196" y="141" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(11)"><rect id="dr-11" x="164" y="152" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-11" x="196" y="163" text-anchor="middle" class="desk-num-text" font-family="Arial">12</text><text id="dp-11" x="196" y="175" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <line x1="16" y1="192" x2="224" y2="192" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+          <!-- Grupa E: 13,14 -->
+          <g class="desk-btn" onclick="selectDesk(12)"><rect id="dr-12" x="164" y="202" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-12" x="196" y="213" text-anchor="middle" class="desk-num-text" font-family="Arial">13</text><text id="dp-12" x="196" y="225" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(13)"><rect id="dr-13" x="164" y="236" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-13" x="196" y="247" text-anchor="middle" class="desk-num-text" font-family="Arial">14</text><text id="dp-13" x="196" y="259" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <line x1="16" y1="276" x2="224" y2="276" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+          <!-- Grupa F: 15,16,18,19 + 17,20 -->
+          <g class="desk-btn" onclick="selectDesk(14)"><rect id="dr-14" x="20" y="286" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-14" x="43" y="297" text-anchor="middle" class="desk-num-text" font-family="Arial">15</text><text id="dp-14" x="43" y="309" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(15)"><rect id="dr-15" x="72" y="286" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-15" x="95" y="297" text-anchor="middle" class="desk-num-text" font-family="Arial">16</text><text id="dp-15" x="95" y="309" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(17)"><rect id="dr-17" x="20" y="320" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-17" x="43" y="331" text-anchor="middle" class="desk-num-text" font-family="Arial">18</text><text id="dp-17" x="43" y="343" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(18)"><rect id="dr-18" x="72" y="320" width="46" height="28" rx="3" class="desk-bg-free"/><text id="dn-18" x="95" y="331" text-anchor="middle" class="desk-num-text" font-family="Arial">19</text><text id="dp-18" x="95" y="343" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(16)"><rect id="dr-16" x="164" y="286" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-16" x="196" y="297" text-anchor="middle" class="desk-num-text" font-family="Arial">17</text><text id="dp-16" x="196" y="309" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(19)"><rect id="dr-19" x="164" y="320" width="64" height="28" rx="3" class="desk-bg-free"/><text id="dn-19" x="196" y="331" text-anchor="middle" class="desk-num-text" font-family="Arial">20</text><text id="dp-19" x="196" y="343" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <text x="14" y="370" font-size="9" fill="#cbd5e1" font-family="Arial">3C</text>
+        </svg>
+      </div>
+    </div>
+
+    <div class="room room-3d">
+      <div class="room-header">🏢 Soba 3D</div>
+      <div class="room-body">
+        <svg class="floor-svg" width="210" height="82" viewBox="0 0 210 82" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="208" height="80" rx="5" fill="#f0fdf4" stroke="#6ee7b7" stroke-width="1.5"/>
+          <g class="desk-btn" onclick="selectDesk(20)"><rect id="dr-20" x="10" y="10" width="90" height="28" rx="3" class="desk-bg-free"/><text id="dn-20" x="55" y="21" text-anchor="middle" class="desk-num-text" font-family="Arial">3D-1</text><text id="dp-20" x="55" y="33" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(21)"><rect id="dr-21" x="110" y="10" width="90" height="28" rx="3" class="desk-bg-free"/><text id="dn-21" x="155" y="21" text-anchor="middle" class="desk-num-text" font-family="Arial">3D-2</text><text id="dp-21" x="155" y="33" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <g class="desk-btn" onclick="selectDesk(22)"><rect id="dr-22" x="10" y="44" width="90" height="28" rx="3" class="desk-bg-free"/><text id="dn-22" x="55" y="55" text-anchor="middle" class="desk-num-text" font-family="Arial">3D-3</text><text id="dp-22" x="55" y="67" text-anchor="middle" class="desk-person-text" font-family="Arial"></text></g>
+          <text x="198" y="77" text-anchor="end" font-size="8" fill="#cbd5e1" font-family="Arial">3D</text>
+        </svg>
+      </div>
+    </div>
+
+  </div>
+  <div class="floor-legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#eff6ff;border:1.5px solid #93c5fd;"></div>Slobodno</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dcfce7;border:1.5px solid #4ade80;"></div>Zauzeto</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fef08a;border:1.5px solid #f59e0b;"></div>Odabrano</div>
+  </div>
+  <p class="info">💡 Tlocrt prikazuje rezervacije za <strong>danas</strong>. Kliknite stol za rezervaciju.</p>
+</div>
+
+<!-- ===== TABLICA ===== -->
+<div id="tab-table" class="table-section" style="display:none;">
+  <span class="section-label">🪑 Stolovi</span>
+  <div class="table-wrap"><table id="deskTable"></table></div>
+  <span class="section-label park">🚗 Parkirna mjesta</span>
+  <div class="table-wrap"><table id="parkTable"></table></div>
+  <p class="info">💡 Vikendi i praznici isključeni. Danas označen žuto.</p>
+</div>
+
+<!-- MODAL rezervacija s tlocrta -->
+<div class="modal-overlay" id="modal-floorbook">
+  <div class="modal">
+    <h2 id="floorbook-title">Rezerviraj stol</h2>
+    <p style="font-size:11px;color:#6b7280;margin-bottom:10px;" id="floorbook-date"></p>
+    <select id="floorbookSelect" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;margin-bottom:4px;"></select>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="saveFloorBook()">Spremi</button>
+      <button class="btn btn-secondary" onclick="closeModal('floorbook')">Odustani</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL OSOBE -->
+<div class="modal-overlay" id="modal-people">
+  <div class="modal">
+    <h2>👥 Upravljanje osobama</h2>
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="switchTab('people','single')">Pojedinačno</button>
+      <button class="tab-btn" onclick="switchTab('people','bulk')">📋 Grupni unos</button>
+    </div>
+    <div class="tab-content active" id="people-tab-single">
+      <div class="add-single-row"><input type="text" id="newPersonInput" placeholder="Ime i prezime..." onkeydown="if(event.key==='Enter')addPerson()"><button onclick="addPerson()">+ Dodaj</button></div>
+      <div class="items-list" id="peopleList"></div>
+    </div>
+    <div class="tab-content" id="people-tab-bulk">
+      <div class="bulk-box"><label>Zalijepite imena — jedno po retku:</label><textarea id="bulkPeopleInput" placeholder="Ana Kovač&#10;Marko Horvat&#10;..."></textarea><p class="bulk-hint">Prazni reci se ignoriraju.</p><div class="bulk-actions"><button class="bulk-add-btn" onclick="bulkAddPeople()">+ Dodaj na listu</button><button class="bulk-replace-btn" onclick="bulkReplacePeople()">⚠ Zamijeni sve</button></div></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="savePeople()">Spremi i zatvori</button><button class="btn btn-secondary" onclick="closeModal('people')">Odustani</button></div>
+  </div>
+</div>
+
+<!-- MODAL STOLOVI -->
+<div class="modal-overlay" id="modal-desks">
+  <div class="modal">
+    <h2>🪑 Upravljanje stolovima</h2>
+    <div class="tab-row"><button class="tab-btn active" onclick="switchTab('desks','single')">Uredi nazive</button><button class="tab-btn" onclick="switchTab('desks','bulk')">📋 Grupno</button><button class="tab-btn" onclick="switchTab('desks','add')">➕ Dodaj</button></div>
+    <div class="tab-content active" id="desks-tab-single"><div class="items-list" id="deskNameList"></div></div>
+    <div class="tab-content" id="desks-tab-bulk">
+      <div class="prefix-box"><label>⚡ Prefiks + redni broj:</label><div class="prefix-row"><input type="text" id="deskPrefixInput" placeholder="npr. Stol..."><span>+ 1,2,3...</span><button onclick="applyPrefix('desk')">Primijeni</button></div></div>
+      <div class="bulk-box"><label>Zalijepite sve nazive (jedno po retku):</label><textarea id="bulkDeskInput"></textarea><div class="bulk-actions"><button class="bulk-replace-btn" onclick="bulkReplaceNames('desk')">⚠ Zamijeni sve</button></div></div>
+    </div>
+    <div class="tab-content" id="desks-tab-add"><div class="add-new-box"><label>Dodaj novi stol:</label><div class="add-new-row"><input type="text" id="newDeskInput" placeholder="Naziv..." onkeydown="if(event.key==='Enter')addItem('desk')"><button onclick="addItem('desk')">+ Dodaj</button></div><p class="add-hint">Prazno = automatski naziv.</p></div></div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="saveNames('desk')">Spremi i zatvori</button><button class="btn btn-secondary" onclick="closeModal('desks')">Odustani</button></div>
+  </div>
+</div>
+
+<!-- MODAL PARKING -->
+<div class="modal-overlay" id="modal-parking">
+  <div class="modal">
+    <h2>🚗 Upravljanje parkirnim mjestima</h2>
+    <div class="tab-row"><button class="tab-btn active" onclick="switchTab('parking','single')">Uredi nazive</button><button class="tab-btn" onclick="switchTab('parking','bulk')">📋 Grupno</button><button class="tab-btn" onclick="switchTab('parking','add')">➕ Dodaj</button></div>
+    <div class="tab-content active" id="parking-tab-single"><div class="items-list" id="parkNameList"></div></div>
+    <div class="tab-content" id="parking-tab-bulk">
+      <div class="prefix-box"><label>⚡ Prefiks + redni broj:</label><div class="prefix-row"><input type="text" id="parkPrefixInput" placeholder="npr. P..."><span>+ 1,2,3...</span><button onclick="applyPrefix('park')">Primijeni</button></div></div>
+      <div class="bulk-box"><label>Zalijepite sve nazive (jedno po retku):</label><textarea id="bulkParkInput"></textarea><div class="bulk-actions"><button class="bulk-replace-btn" onclick="bulkReplaceNames('park')">⚠ Zamijeni sve</button></div></div>
+    </div>
+    <div class="tab-content" id="parking-tab-add"><div class="add-new-box"><label>Dodaj novo parkirno mjesto:</label><div class="add-new-row"><input type="text" id="newParkInput" placeholder="Naziv..." onkeydown="if(event.key==='Enter')addItem('park')"><button onclick="addItem('park')">+ Dodaj</button></div><p class="add-hint">Prazno = automatski naziv.</p></div></div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="saveNames('park')">Spremi i zatvori</button><button class="btn btn-secondary" onclick="closeModal('parking')">Odustani</button></div>
+  </div>
+</div>
+
+<script>
+const HR_PRAZNICI_FIKSNI=['01-01','01-06','05-01','05-30','06-22','08-05','08-15','11-01','11-18','12-25','12-26'];
+const POMICNI={2024:['2024-03-31','2024-04-01','2024-05-30'],2025:['2025-04-20','2025-04-21','2025-06-19'],2026:['2026-04-05','2026-04-06','2026-06-04'],2027:['2027-03-28','2027-03-29','2027-05-27'],2028:['2028-04-16','2028-04-17','2028-05-25']};
+const MONTHS_HR=['Siječanj','Veljača','Ožujak','Travanj','Svibanj','Lipanj','Srpanj','Kolovoz','Rujan','Listopad','Studeni','Prosinac'];
+const DAYS_HR=['Ned','Pon','Uto','Sri','Čet','Pet','Sub'];
+const DAYS_HR_FULL=['Nedjelja','Ponedjeljak','Utorak','Srijeda','Četvrtak','Petak','Subota'];
+
+let deskNames=['Stol 1','Stol 2','Stol 3','Stol 4','Stol 5','Stol 6','Stol 7','Stol 8','Stol 9','Stol 10','Stol 11','Stol 12','Stol 13','Stol 14','Stol 15','Stol 16','Stol 17','Stol 18','Stol 19','Stol 20','3D-1','3D-2','3D-3'];
+let parkNames=Array.from({length:8},(_,i)=>`P${i+1}`);
+let people=['Ana Kovač','Marko Horvat','Ivan Perić','Petra Novak','Luka Jurić','Maja Blažić','Tomislav Knez','Sara Vuković','Filip Šimić','Nina Babić'];
+let deskData={}, parkData={};
+let tempDeskNames=[], tempParkNames=[], tempPeople=[];
+let selectedDeskIdx=null;
+let fbReady=false;
+let _ignoreNext={desk:false,park:false,deskNames:false,parkNames:false,people:false};
+
+// ===== SYNC STATUS =====
+function setSyncStatus(state,msg){
+  const el=document.getElementById('syncStatus');
+  el.className=state; el.textContent=msg;
+  if(state==='synced') setTimeout(()=>{if(el.className==='synced')el.textContent='✓ Sinkronizirano';},2000);
+}
+
+// ===== FIREBASE =====
+function initFirebase(){
+  window._fbListen('reservations/desk', val=>{
+    if(_ignoreNext.desk){_ignoreNext.desk=false;return;}
+    deskData=val||{};
+    silentRebuildDesk(); updateFloorplan(); updateStatusCards();
+  });
+  window._fbListen('reservations/park', val=>{
+    if(_ignoreNext.park){_ignoreNext.park=false;return;}
+    parkData=val||{};
+    silentRebuildPark(); updateStatusCards();
+  });
+  window._fbListen('config/deskNames', val=>{
+    if(_ignoreNext.deskNames){_ignoreNext.deskNames=false;return;}
+    if(val&&Array.isArray(val)){deskNames=val;silentRebuildDesk();updateFloorplan();}
+  });
+  window._fbListen('config/parkNames', val=>{
+    if(_ignoreNext.parkNames){_ignoreNext.parkNames=false;return;}
+    if(val&&Array.isArray(val)){parkNames=val;silentRebuildPark();}
+  });
+  window._fbListen('config/people', val=>{
+    if(_ignoreNext.people){_ignoreNext.people=false;return;}
+    if(val&&Array.isArray(val)){people=val;silentRebuildDesk();silentRebuildPark();}
+  });
+  fbReady=true;
+  document.getElementById('connectingOverlay').classList.add('hidden');
+  setSyncStatus('synced','✓ Sinkronizirano');
+}
+
+async function fbSave(path,value,ignoreKey){
+  setSyncStatus('syncing','⟳ Spremanje...');
+  if(ignoreKey) _ignoreNext[ignoreKey]=true;
+  try{
+    await window._fbSet(path,value);
+    setSyncStatus('synced','✓ Sinkronizirano');
+  }catch(e){
+    setSyncStatus('error','✗ Greška pri spremanju');
+    if(ignoreKey) _ignoreNext[ignoreKey]=false;
+    console.error(e);
+  }
+}
+
+// ===== DATE HELPERS =====
+function toDateStr(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function getTodayStr(){return toDateStr(new Date());}
+function isPraznik(ds){const y=parseInt(ds.slice(0,4));if((POMICNI[y]||[]).includes(ds))return true;return HR_PRAZNICI_FIKSNI.includes(ds.slice(5));}
+function isWorkday(d){const day=d.getDay();if(day===0||day===6)return false;return !isPraznik(toDateStr(d));}
+function getWorkdays(year,month){const days=[],n=new Date(year,month+1,0).getDate();for(let d=1;d<=n;d++){const date=new Date(year,month,d);if(isWorkday(date))days.push(date);}return days;}
+function nextWorkday(d){const next=new Date(d);do{next.setDate(next.getDate()+1);}while(!isWorkday(next));return next;}
+
+// ===== MAIN TABS =====
+function showMainTab(tab){
+  document.getElementById('tab-floorplan').style.display=tab==='floorplan'?'block':'none';
+  document.getElementById('tab-table').style.display=tab==='table'?'block':'none';
+  document.querySelectorAll('.main-tab').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').includes("'"+tab+"'")));
+  if(tab==='floorplan') updateFloorplan();
+}
+
+// ===== STATUS KARTICE =====
+function updateStatusCards(){
+  const today=new Date(),todayStr=toDateStr(today);
+  const tomorrow=nextWorkday(today),tomorrowStr=toDateStr(tomorrow);
+  function cf(data,names,ds){let t=0;names.forEach((_,i)=>{if(data[`${ds}_${i}`])t++;});return{free:names.length-t,taken:t};}
+  if(isWorkday(today)){
+    let{free,taken}=cf(deskData,deskNames,todayStr);
+    document.getElementById('dt-free').textContent=free;document.getElementById('dt-taken').textContent=taken;
+    document.getElementById('card-desk-today').style.borderLeftColor=taken/deskNames.length>=.8?'#ef4444':taken/deskNames.length>=.5?'#f59e0b':'#22c55e';
+    let{free:pf,taken:pt}=cf(parkData,parkNames,todayStr);
+    document.getElementById('pt-free').textContent=pf;document.getElementById('pt-taken').textContent=pt;
+    document.getElementById('card-park-today').style.borderLeftColor=pt/parkNames.length>=.8?'#ef4444':pt/parkNames.length>=.5?'#f59e0b':'#065f46';
+  }else{['dt-free','dt-taken','pt-free','pt-taken'].forEach(id=>document.getElementById(id).textContent='—');}
+  let{free:df,taken:dt}=cf(deskData,deskNames,tomorrowStr);
+  document.getElementById('dm-free').textContent=df;document.getElementById('dm-taken').textContent=dt;
+  document.getElementById('card-desk-tomorrow').querySelector('.stat-title').textContent=`🪑 Stolovi — ${DAYS_HR_FULL[tomorrow.getDay()].slice(0,3)} ${tomorrow.getDate()}.${tomorrow.getMonth()+1}.`;
+  let{free:pf2,taken:pt2}=cf(parkData,parkNames,tomorrowStr);
+  document.getElementById('pm-free').textContent=pf2;document.getElementById('pm-taken').textContent=pt2;
+  document.getElementById('card-park-tomorrow').querySelector('.stat-title').textContent=`🚗 Parking — ${DAYS_HR_FULL[tomorrow.getDay()].slice(0,3)} ${tomorrow.getDate()}.${tomorrow.getMonth()+1}.`;
+}
+
+// ===== TLOCRT =====
+function updateFloorplan(){
+  const todayStr=getTodayStr(),today=new Date();
+  const label=document.getElementById('floorDateLabel');
+  if(isWorkday(today)){label.textContent=`${DAYS_HR_FULL[today.getDay()]}, ${today.getDate()}. ${MONTHS_HR[today.getMonth()]} ${today.getFullYear()}`;label.style.color='#1a56a0';}
+  else{label.textContent='Danas nije radni dan';label.style.color='#9ca3af';}
+  for(let i=0;i<23;i++){
+    const rect=document.getElementById('dr-'+i),nameEl=document.getElementById('dn-'+i),personEl=document.getElementById('dp-'+i);
+    if(!rect)continue;
+    const person=deskData[`${todayStr}_${i}`]||'';
+    rect.setAttribute('class',person?'desk-bg-taken':'desk-bg-free');rect.removeAttribute('style');
+    nameEl.textContent=deskNames[i]||`Stol ${i+1}`;nameEl.setAttribute('class',person?'desk-num-text taken':'desk-num-text');
+    if(person){const p=person.trim().split(' ');personEl.textContent=p.length>1?p[0][0]+'. '+p[p.length-1]:person;}
+    else personEl.textContent='';
+  }
+}
+
+function selectDesk(idx){
+  const today=new Date();if(!isWorkday(today)){alert('Danas nije radni dan.');return;}
+  selectedDeskIdx=idx;const todayStr=getTodayStr();
+  document.getElementById('floorbook-title').textContent='Rezervacija: '+deskNames[idx];
+  document.getElementById('floorbook-date').textContent=DAYS_HR_FULL[today.getDay()]+', '+today.getDate()+'. '+MONTHS_HR[today.getMonth()]+' '+today.getFullYear();
+  for(let i=0;i<23;i++){const r=document.getElementById('dr-'+i);if(!r)continue;if(i===idx){r.removeAttribute('class');r.setAttribute('style','fill:#fef08a;stroke:#f59e0b;stroke-width:2;');}else r.removeAttribute('style');}
+  const sel=document.getElementById('floorbookSelect');
+  sel.innerHTML='<option value="">— Slobodno —</option>';
+  people.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o);});
+  sel.value=deskData[`${todayStr}_${idx}`]||'';
+  openModal('floorbook');
+}
+
+async function saveFloorBook(){
+  if(selectedDeskIdx===null)return;
+  const todayStr=getTodayStr(),key=`${todayStr}_${selectedDeskIdx}`,val=document.getElementById('floorbookSelect').value;
+  if(val) deskData[key]=val; else delete deskData[key];
+  closeModal('floorbook');updateFloorplan();
+  await fbSave('reservations/desk',deskData,'desk');
+  const month=parseInt(document.getElementById('monthSel').value),year=parseInt(document.getElementById('yearSel').value);
+  if(new Date().getFullYear()===year&&new Date().getMonth()===month)
+    buildTable('deskTable',deskNames,deskData,false,getWorkdays(year,month),todayStr,year,month);
+  updateStatusCards();
+}
+
+// ===== MODALI =====
+function switchTab(modal,tab){
+  document.querySelectorAll('[id^="'+modal+'-tab-"]').forEach(el=>el.classList.remove('active'));
+  document.getElementById(modal+'-tab-'+tab).classList.add('active');
+  document.querySelectorAll('#modal-'+modal+' .tab-btn').forEach(btn=>{btn.classList.toggle('active',btn.getAttribute('onclick').includes("'"+tab+"'"));});
+}
+function openModal(type){
+  if(type==='people'){tempPeople=[...people];renderPeopleList();}
+  else if(type==='desks'){tempDeskNames=[...deskNames];renderNameList('desk');}
+  else if(type==='parking'){tempParkNames=[...parkNames];renderNameList('park');}
+  const el=document.getElementById('modal-'+type);
+  if(type!=='floorbook'){el.querySelectorAll('.tab-content').forEach((e,i)=>e.classList.toggle('active',i===0));el.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===0));}
+  el.classList.add('open');
+}
+function closeModal(type){document.getElementById('modal-'+type).classList.remove('open');if(type==='floorbook')updateFloorplan();}
+document.querySelectorAll('.modal-overlay').forEach(el=>{el.addEventListener('click',function(e){if(e.target===this){this.classList.remove('open');updateFloorplan();}});});
+
+// ===== OSOBE =====
+function renderPeopleList(){
+  const list=document.getElementById('peopleList');list.innerHTML='';
+  tempPeople.forEach((p,i)=>{
+    const div=document.createElement('div');div.className='list-item';
+    const inp=document.createElement('input');inp.type='text';inp.value=p;inp.addEventListener('input',function(){tempPeople[i]=this.value;});
+    const del=document.createElement('button');del.className='del-btn';del.textContent='✕';del.onclick=()=>{tempPeople.splice(i,1);renderPeopleList();};
+    div.appendChild(inp);div.appendChild(del);list.appendChild(div);
+  });
+}
+function addPerson(){const inp=document.getElementById('newPersonInput');const n=inp.value.trim();if(!n)return;tempPeople.push(n);inp.value='';renderPeopleList();}
+function bulkAddPeople(){const names=document.getElementById('bulkPeopleInput').value.split('\n').map(s=>s.trim()).filter(Boolean);if(!names.length){alert('Nema podataka!');return;}let added=0;names.forEach(n=>{if(!tempPeople.includes(n)){tempPeople.push(n);added++;}});document.getElementById('bulkPeopleInput').value='';renderPeopleList();switchTab('people','single');alert('Dodano '+added+' osoba.');}
+function bulkReplacePeople(){const names=document.getElementById('bulkPeopleInput').value.split('\n').map(s=>s.trim()).filter(Boolean);if(!names.length||!confirm('Zamijeni cijelu listu?'))return;tempPeople=[...names];document.getElementById('bulkPeopleInput').value='';renderPeopleList();switchTab('people','single');}
+async function savePeople(){people=[...tempPeople];closeModal('people');await fbSave('config/people',people,'people');rebuild();}
+
+// ===== NAZIVI =====
+function renderNameList(type){
+  const names=type==='desk'?tempDeskNames:tempParkNames,listId=type==='desk'?'deskNameList':'parkNameList';
+  const list=document.getElementById(listId);list.innerHTML='';
+  names.forEach((name,i)=>{
+    const div=document.createElement('div');div.className='list-item';
+    const idx=document.createElement('span');idx.className='item-idx';idx.textContent=(i+1)+'.';
+    const inp=document.createElement('input');inp.type='text';inp.value=name;inp.addEventListener('input',function(){if(type==='desk')tempDeskNames[i]=this.value;else tempParkNames[i]=this.value;});
+    const del=document.createElement('button');del.className='del-btn';del.textContent='✕';del.onclick=()=>{if(type==='desk')tempDeskNames.splice(i,1);else tempParkNames.splice(i,1);renderNameList(type);};
+    div.appendChild(idx);div.appendChild(inp);div.appendChild(del);list.appendChild(div);
+  });
+}
+function addItem(type){const id=type==='desk'?'newDeskInput':'newParkInput';const n=document.getElementById(id).value.trim();const auto=type==='desk'?`Stol ${tempDeskNames.length+1}`:`P${tempParkNames.length+1}`;if(type==='desk')tempDeskNames.push(n||auto);else tempParkNames.push(n||auto);document.getElementById(id).value='';renderNameList(type);switchTab(type==='desk'?'desks':'parking','single');}
+function applyPrefix(type){const id=type==='desk'?'deskPrefixInput':'parkPrefixInput';const prefix=document.getElementById(id).value.trim();if(!prefix){alert('Unesite prefiks!');return;}const names=type==='desk'?tempDeskNames:tempParkNames;const nn=names.map((_,i)=>`${prefix} ${i+1}`);if(type==='desk')tempDeskNames=nn;else tempParkNames=nn;renderNameList(type);document.getElementById(id).value='';switchTab(type==='desk'?'desks':'parking','single');}
+function bulkReplaceNames(type){const id=type==='desk'?'bulkDeskInput':'bulkParkInput';const names=document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);if(!names.length||!confirm('Zamijeni sve nazive?'))return;if(type==='desk')tempDeskNames=names;else tempParkNames=names;document.getElementById(id).value='';renderNameList(type);switchTab(type==='desk'?'desks':'parking','single');}
+async function saveNames(type){
+  if(type==='desk')deskNames=[...tempDeskNames];else parkNames=[...tempParkNames];
+  closeModal(type==='desk'?'desks':'parking');
+  const fbKey=type==='desk'?'deskNames':'parkNames',ignKey=type==='desk'?'deskNames':'parkNames';
+  await fbSave('config/'+fbKey,type==='desk'?deskNames:parkNames,ignKey);
+  rebuild();updateFloorplan();
+}
+
+// ===== TABLICA =====
+function makeSelect(data,key,isParking,year,month){
+  const sel=document.createElement('select');
+  ['',... people].forEach((p,i)=>{const o=document.createElement('option');o.value=p;o.textContent=i===0?'—':p;sel.appendChild(o);});
+  sel.value=data[key]||'';
+  if(data[key])sel.classList.add(isParking?'park-reserved':'reserved');
+  sel.addEventListener('change',async function(){
+    const val=this.value;
+    if(val) data[key]=val; else delete data[key];
+    this.classList.toggle(isParking?'park-reserved':'reserved',!!val);
+    updateStatusCards();
+    if(!isParking) updateFloorplan();
+    await fbSave('reservations/'+(isParking?'park':'desk'),isParking?parkData:deskData,isParking?'park':'desk');
+  });
+  return sel;
+}
+
+function buildTable(tableId,names,data,isParking,workdays,todayStr,year,month){
+  const table=document.getElementById(tableId);table.innerHTML='';
+  const hCls=isParking?'park-header':'',dCls=isParking?'park-date':'';
+  const headRow=document.createElement('tr');const th0=document.createElement('th');th0.className='corner';headRow.appendChild(th0);
+  workdays.forEach(date=>{const ds=toDateStr(date);const th=document.createElement('th');th.className='day-header '+hCls+(ds===todayStr?' today-col':'');th.textContent=DAYS_HR[date.getDay()];headRow.appendChild(th);});
+  table.appendChild(headRow);
+  const dateRow=document.createElement('tr');dateRow.className='date-row';
+  const tdC=document.createElement('td');tdC.className='corner-date';tdC.textContent=MONTHS_HR[parseInt(document.getElementById('monthSel').value)]+' '+year;dateRow.appendChild(tdC);
+  workdays.forEach(date=>{const ds=toDateStr(date);const td=document.createElement('td');td.className=(dCls+(ds===todayStr?' today-col':'')).trim();td.textContent=date.getDate()+'.';dateRow.appendChild(td);});
+  table.appendChild(dateRow);
+  names.forEach((name,idx)=>{
+    const tr=document.createElement('tr');const tdL=document.createElement('td');tdL.className='row-label'+(isParking?' park-label':'');tdL.textContent=name;tdL.title=name;tr.appendChild(tdL);
+    workdays.forEach(date=>{const ds=toDateStr(date);const key=`${ds}_${idx}`;const td=document.createElement('td');td.className='cell'+(ds===todayStr?' today-col':'');td.appendChild(makeSelect(data,key,isParking,year,month));tr.appendChild(td);});
+    table.appendChild(tr);
+  });
+}
+
+function silentRebuildDesk(){
+  const month=parseInt(document.getElementById('monthSel').value),year=parseInt(document.getElementById('yearSel').value);
+  buildTable('deskTable',deskNames,deskData,false,getWorkdays(year,month),getTodayStr(),year,month);
+}
+function silentRebuildPark(){
+  const month=parseInt(document.getElementById('monthSel').value),year=parseInt(document.getElementById('yearSel').value);
+  buildTable('parkTable',parkNames,parkData,true,getWorkdays(year,month),getTodayStr(),year,month);
+}
+function rebuild(){
+  const month=parseInt(document.getElementById('monthSel').value),year=parseInt(document.getElementById('yearSel').value);
+  const todayStr=getTodayStr(),workdays=getWorkdays(year,month);
+  buildTable('deskTable',deskNames,deskData,false,workdays,todayStr,year,month);
+  buildTable('parkTable',parkNames,parkData,true,workdays,todayStr,year,month);
+  updateStatusCards();updateFloorplan();
+}
+
+function init(){
+  const today=new Date();
+  const mSel=document.getElementById('monthSel'),ySel=document.getElementById('yearSel');
+  MONTHS_HR.forEach((m,i)=>{const o=document.createElement('option');o.value=i;o.textContent=m;if(i===today.getMonth())o.selected=true;mSel.appendChild(o);});
+  for(let y=2024;y<=2028;y++){const o=document.createElement('option');o.value=y;o.textContent=y;if(y===today.getFullYear())o.selected=true;ySel.appendChild(o);}
+  rebuild();
+  if(window._fbReady) initFirebase();
+  else{
+    window.addEventListener('firebase-ready',initFirebase);
+    setTimeout(()=>{if(!fbReady){document.getElementById('connectingOverlay').classList.add('hidden');setSyncStatus('error','✗ Firebase nije spojen — provjerite konfiguraciju');}},15000);
+  }
+}
+init();
+</script>
+</body>
+</html>
